@@ -1,0 +1,473 @@
+openapi: 3.0.3
+info:
+  title: Todo AI Chatbot API - Phase III
+  description: |
+    Chat API for the Todo AI Chatbot with multi-agent skills architecture.
+
+    ## Authentication
+    All endpoints require a valid JWT token from Better Auth in the Authorization header.
+
+    ## Skills Architecture
+    Messages are routed to specialized skill agents:
+    - **TaskManagementSkill**: CRUD operations (add, list, complete, delete, update)
+    - **TaskSearchSkill**: Advanced search and filtering
+    - **TaskAnalyticsSkill**: Statistics and productivity insights
+    - **TaskRecommendationSkill**: Smart suggestions and priorities
+  version: 2.0.0
+  contact:
+    name: Phase III Chat API
+
+servers:
+  - url: http://localhost:8000/api
+    description: Local development
+  - url: https://your-backend.railway.app/api
+    description: Production (Railway)
+
+paths:
+  /{user_id}/chat:
+    post:
+      summary: Send chat message
+      description: |
+        Send a message to the AI assistant and receive a response.
+        The message is routed to the appropriate skill agent based on intent.
+      operationId: sendChatMessage
+      tags:
+        - Chat
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          description: User ID from Better Auth
+          schema:
+            type: string
+            example: "usr_abc123"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+            examples:
+              create_task:
+                summary: Create a new task
+                value:
+                  message: "Add a task to buy groceries"
+              list_tasks:
+                summary: List all tasks
+                value:
+                  message: "Show me my tasks"
+                  conversation_id: 1
+              search_tasks:
+                summary: Search for tasks
+                value:
+                  message: "Find tasks with 'meeting' in the title"
+                  conversation_id: 1
+              get_analytics:
+                summary: Get task analytics
+                value:
+                  message: "What's my completion rate this week?"
+                  conversation_id: 1
+              get_recommendations:
+                summary: Get recommendations
+                value:
+                  message: "What should I work on next?"
+                  conversation_id: 1
+      responses:
+        '200':
+          description: Successful response from AI assistant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+              examples:
+                task_created:
+                  summary: Task created response
+                  value:
+                    conversation_id: 1
+                    response: "I've created a new task 'buy groceries' for you!"
+                    skill_used: "TaskManagementSkill"
+                    tool_calls:
+                      - name: "add_task"
+                        arguments:
+                          title: "buy groceries"
+                        result:
+                          id: 42
+                          title: "buy groceries"
+                    created_at: "2025-12-15T10:30:00Z"
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Message cannot be empty"
+                code: "INVALID_REQUEST"
+        '401':
+          description: Unauthorized - Invalid or missing JWT
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Invalid authentication token"
+                code: "UNAUTHORIZED"
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Too many requests. Please wait a moment."
+                code: "RATE_LIMIT_EXCEEDED"
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Something went wrong. Please try again."
+                code: "INTERNAL_ERROR"
+      security:
+        - bearerAuth: []
+
+  /{user_id}/conversations:
+    get:
+      summary: Get user's conversations
+      description: Retrieve list of conversations for a user
+      operationId: getConversations
+      tags:
+        - Conversations
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+            maximum: 50
+      responses:
+        '200':
+          description: List of conversations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Conversation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      security:
+        - bearerAuth: []
+
+  /{user_id}/conversations/{conversation_id}:
+    get:
+      summary: Get conversation history
+      description: Retrieve messages from a specific conversation
+      operationId: getConversationHistory
+      tags:
+        - Conversations
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: conversation_id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 100
+      responses:
+        '200':
+          description: Conversation with messages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationDetail'
+        '404':
+          description: Conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      security:
+        - bearerAuth: []
+
+    delete:
+      summary: Delete conversation
+      description: Delete a conversation and all its messages
+      operationId: deleteConversation
+      tags:
+        - Conversations
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: conversation_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Conversation deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Conversation deleted successfully"
+        '404':
+          description: Conversation not found
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      security:
+        - bearerAuth: []
+
+  /tasks/stats:
+    get:
+      summary: Get task statistics
+      description: |
+        Get aggregated task statistics for analytics.
+        Used by TaskAnalyticsSkill.
+      operationId: getTaskStats
+      tags:
+        - Tasks (Extended)
+      responses:
+        '200':
+          description: Task statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskStats'
+      security:
+        - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token from Better Auth
+
+  schemas:
+    ChatRequest:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+          description: User's message to the AI assistant
+          minLength: 1
+          maxLength: 4000
+          example: "Add a task to buy groceries"
+        conversation_id:
+          type: integer
+          nullable: true
+          description: |
+            Existing conversation ID to continue.
+            If null, a new conversation is created.
+          example: 1
+
+    ChatResponse:
+      type: object
+      required:
+        - conversation_id
+        - response
+        - created_at
+      properties:
+        conversation_id:
+          type: integer
+          description: ID of the conversation
+          example: 1
+        response:
+          type: string
+          description: AI assistant's response text
+          example: "I've created a new task 'buy groceries' for you!"
+        skill_used:
+          type: string
+          nullable: true
+          description: Which skill agent processed this message
+          enum:
+            - TaskManagementSkill
+            - TaskSearchSkill
+            - TaskAnalyticsSkill
+            - TaskRecommendationSkill
+          example: "TaskManagementSkill"
+        tool_calls:
+          type: array
+          nullable: true
+          description: MCP tools that were called (if any)
+          items:
+            $ref: '#/components/schemas/ToolCall'
+        created_at:
+          type: string
+          format: date-time
+          description: When the response was generated
+          example: "2025-12-15T10:30:00Z"
+
+    ToolCall:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Name of the MCP tool called
+          example: "add_task"
+        arguments:
+          type: object
+          description: Arguments passed to the tool
+          additionalProperties: true
+        result:
+          type: object
+          description: Result returned by the tool
+          additionalProperties: true
+
+    Conversation:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        user_id:
+          type: string
+          example: "usr_abc123"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        message_count:
+          type: integer
+          description: Number of messages in conversation
+          example: 24
+
+    ConversationDetail:
+      allOf:
+        - $ref: '#/components/schemas/Conversation'
+        - type: object
+          properties:
+            messages:
+              type: array
+              items:
+                $ref: '#/components/schemas/Message'
+
+    Message:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        role:
+          type: string
+          enum: [user, assistant]
+          example: "user"
+        content:
+          type: string
+          example: "Add a task to buy groceries"
+        skill_used:
+          type: string
+          nullable: true
+          example: "TaskManagementSkill"
+        tool_calls:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/ToolCall'
+        created_at:
+          type: string
+          format: date-time
+
+    TaskStats:
+      type: object
+      properties:
+        total_tasks:
+          type: integer
+          description: Total number of tasks
+          example: 25
+        completed_tasks:
+          type: integer
+          description: Number of completed tasks
+          example: 18
+        pending_tasks:
+          type: integer
+          description: Number of pending tasks
+          example: 7
+        completion_rate:
+          type: number
+          format: float
+          description: Completion rate as percentage
+          example: 72.0
+        tasks_by_day:
+          type: array
+          description: Task completion counts by day (last 7 days)
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+                format: date
+              created:
+                type: integer
+              completed:
+                type: integer
+
+    Error:
+      type: object
+      required:
+        - error
+        - code
+      properties:
+        error:
+          type: string
+          description: Human-readable error message
+        code:
+          type: string
+          description: Machine-readable error code
+          enum:
+            - INVALID_REQUEST
+            - UNAUTHORIZED
+            - NOT_FOUND
+            - RATE_LIMIT_EXCEEDED
+            - INTERNAL_ERROR
+        details:
+          type: object
+          description: Additional error context
+          additionalProperties: true
+
+  responses:
+    Unauthorized:
+      description: Unauthorized - Invalid or missing JWT
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+tags:
+  - name: Chat
+    description: Main chat endpoint for AI assistant interaction
+  - name: Conversations
+    description: Conversation management endpoints
+  - name: Tasks (Extended)
+    description: Extended task endpoints for analytics
